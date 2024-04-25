@@ -8,15 +8,14 @@
  * See a full list of supported triggers at https://firebase.google.com/docs/functions
  */
 
-import {onRequest} from "firebase-functions/v2/https";
+import {onCall, HttpsError} from "firebase-functions/v2/https";
 import mysql from "mysql2/promise";
 import {Connector, IpAddressTypes} from "@google-cloud/cloud-sql-connector";
 
-interface DatabaseCallback {
-  (connection: mysql.PoolConnection): Promise<void>;
-}
+type MySqlResult = mysql.OkPacket | mysql.ResultSetHeader |
+  mysql.RowDataPacket[] | mysql.RowDataPacket[][] | mysql.OkPacket[];
 
-async function connect(fn: DatabaseCallback) {
+async function executeSql(sql: string, params: any): Promise<MySqlResult> {
   const connector = new Connector();
   const clientOpts = await connector.getOptions({
     instanceConnectionName: "nfl-db-83d98:us-central1:nfl-db-mysql-instance",
@@ -29,9 +28,14 @@ async function connect(fn: DatabaseCallback) {
     database: "NFL",
   });
   const conn = await pool.getConnection();
-  await fn(conn);
+
+  const stmt = await conn.prepare(sql);
+  const [result] = await stmt.execute(params);
+
   await pool.end();
   connector.close();
+
+  return result;
 }
 
 function stringToDate(str: string): Date {
@@ -42,181 +46,145 @@ function stringToDate(str: string): Date {
   return new Date(year, month - 1, day);
 }
 
-export const addGame = onRequest(async (request, response) => {
-  if (request.body.date == null) {
-    response.send({error: "Must specify a game date."});
-    return;
+export const addGame = onCall(async (request) => {
+  if (request.data.date == null) {
+    throw new HttpsError("invalid-argument", "Must specify a game date.");
   }
-  if (request.body.homeTeamId == null) {
-    response.send({error: "Must specify a home team."});
-    return;
+  if (request.data.homeTeamId == null) {
+    throw new HttpsError("invalid-argument", "Must specify a home team.");
   }
-  if (request.body.awayTeamId == null) {
-    response.send({error: "Must specify an away team."});
-    return;
+  if (request.data.awayTeamId == null) {
+    throw new HttpsError("invalid-argument", "Must specify an away team.");
   }
-  if (request.body.homeTeamScore == null) {
-    response.send({error: "Must specify a home team score."});
-    return;
+  if (request.data.homeTeamScore == null) {
+    throw new HttpsError("invalid-argument", "Must specify a home team score.");
   }
-  if (request.body.awayTeamScore == null) {
-    response.send({error: "Must specify an away team score."});
-    return;
+  if (request.data.awayTeamScore == null) {
+    throw new HttpsError("invalid-argument",
+      "Must specify an away team score.");
   }
 
-  const date = stringToDate(request.body.date);
-  const homeTeamId = parseInt(request.body.homeTeamId.toString());
-  const awayTeamId = parseInt(request.body.awayTeamId.toString());
-  const homeTeamScore = parseInt(request.body.homeTeamScore.toString());
-  const awayTeamScore = parseInt(request.body.awayTeamScore.toString());
+  const date = stringToDate(request.data.date);
+  const homeTeamId = request.data.homeTeamId;
+  const awayTeamId = request.data.awayTeamId;
+  const homeTeamScore = request.data.homeTeamScore;
+  const awayTeamScore = request.data.awayTeamScore;
 
-  await connect(async (conn) => {
-    const stmt = await conn.prepare(`
-      INSERT INTO Game
-        (GameDate, HomeTeamId, AwayTeamId, HomeTeamScore, AwayTeamScore)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    const [result] = await stmt.execute([date, homeTeamId, awayTeamId,
-      homeTeamScore, awayTeamScore]);
-    response.send(result);
-  });
+  return executeSql(`
+    INSERT INTO Game
+      (GameDate, HomeTeamId, AwayTeamId, HomeTeamScore, AwayTeamScore)
+    VALUES (?, ?, ?, ?, ?)
+  `, [date, homeTeamId, awayTeamId, homeTeamScore, awayTeamScore]);
 });
 
-export const addPlayer = onRequest(async (request, response) => {
-  if (request.body.teamId == null) {
-    response.send({error: "Must specify a game date."});
-    return;
+export const addPlayer = onCall(async (request) => {
+  if (request.data.teamId == null) {
+    throw new HttpsError("invalid-argument", "Must specify a team ID.");
   }
-  if (request.body.playerName == null) {
-    response.send({error: "Must specify a home team."});
-    return;
+  if (request.data.playerName == null) {
+    throw new HttpsError("invalid-argument", "Must specify a player name.");
   }
-  if (request.body.position == null) {
-    response.send({error: "Must specify an away team."});
-    return;
+  if (request.data.position == null) {
+    throw new HttpsError("invalid-argument", "Must specify a player position.");
   }
 
-  console.log(request.body);
-  const teamId = parseInt(request.body.teamId.toString());
-  const playerName = request.body.playerName;
-  const position = request.body.position;
+  const teamId = request.data.teamId;
+  const playerName = request.data.playerName;
+  const position = request.data.position;
 
-  await connect(async (conn) => {
-    const stmt = await conn.prepare(
-      "INSERT INTO Player (TeamId, PlayerName, Position) VALUES (?, ?, ?)"
-    );
-    const [result] = await stmt.execute([teamId, playerName, position]);
-    response.send(result);
-  });
+  return executeSql(
+    "INSERT INTO Player (TeamId, PlayerName, Position) VALUES (?, ?, ?)",
+    [teamId, playerName, position]
+  );
 });
 
-export const getPlayersOnTeam = onRequest(async (request, response) => {
-  if (request.query.teamId == null) {
-    response.send({error: "Must specify a team ID."});
-    return;
+export const getPlayersOnTeam = onCall(async (request) => {
+  if (request.data.teamId == null) {
+    throw new HttpsError("invalid-argument", "Must specify a team ID.");
   }
 
-  const teamId = parseInt(request.query.teamId.toString());
-  await connect(async (conn) => {
-    const stmt = await conn.prepare("SELECT * FROM Player WHERE TeamId = ?");
-    const [players] = await stmt.execute([teamId]);
-    response.send(players);
-  });
+  const teamId = request.data.teamId;
+  return executeSql("SELECT * FROM Player WHERE TeamId = ?", [teamId]);
 });
 
-export const getPlayersByTeamAndPos = onRequest(async (request, response) => {
-  if (request.query.teamId == null) {
-    response.send({error: "Must specify a team ID."});
-    return;
+export const getPlayersByTeamAndPos = onCall(async (request) => {
+  if (request.data.teamId == null) {
+    throw new HttpsError("invalid-argument", "Must specify a team ID.");
   }
-  if (request.query.position == null) {
-    response.send({error: "Must specify a position."});
-    return;
+  if (request.data.position == null) {
+    throw new HttpsError("invalid-argument", "Must specify a position.");
   }
 
-  const teamId = parseInt(request.query.teamId.toString());
-  const position = request.query.position;
-  await connect(async (conn) => {
-    const stmt = await conn.prepare(
-      "SELECT * FROM Player WHERE TeamId = ? AND Position = ?"
-    );
-    const [players] = await stmt.execute([teamId, position]);
-    response.send(players);
-  });
+  const teamId = request.data.teamId;
+  const position = request.data.position;
+  return executeSql(
+    "SELECT * FROM Player WHERE TeamId = ? AND Position = ?",
+    [teamId, position]
+  );
 });
 
-export const getGamesByTeam = onRequest(async (request, response) => {
-  if (request.query.teamId == null) {
-    response.send({error: "Must specify a team ID."});
-    return;
+export const getGamesByTeam = onCall(async (request) => {
+  if (request.data.teamId == null) {
+    throw new HttpsError("invalid-argument", "Must specify a team ID.");
   }
 
-  const teamId = parseInt(request.query.teamId.toString());
-  await connect(async (conn) => {
-    const stmt = await conn.prepare(`
-      (
-        SELECT
-          Game.GameDate,
-          HomeTeam.TeamLocation AS HomeTeamLocation,
-          HomeTeam.Nickname AS HomeTeamNickname,
-          AwayTeam.TeamLocation AS AwayTeamLocation,
-          AwayTeam.Nickname AS AwayTeamNickname,
-          Game.HomeTeamScore,
-          Game.AwayTeamScore
-        FROM Team AS HomeTeam
-        JOIN Game
-          ON Game.HomeTeamId = HomeTeam.TeamId
-        JOIN Team AS AwayTeam
-          ON Game.AwayTeamId = AwayTeam.TeamId
-        WHERE HomeTeam.TeamId = ?
-      )
-      UNION
-      (
-        SELECT
-          Game.GameDate,
-          HomeTeam.TeamLocation AS HomeTeamLocation,
-          HomeTeam.Nickname AS HomeTeamNickname,
-          AwayTeam.TeamLocation AS AwayTeamLocation,
-          AwayTeam.Nickname AS AwayTeamNickname,
-          Game.HomeTeamScore,
-          Game.AwayTeamScore
-        FROM Team AS AwayTeam
-        JOIN Game
-          ON Game.AwayTeamId = AwayTeam.TeamId
-        JOIN Team AS HomeTeam
-          ON Game.HomeTeamId = HomeTeam.TeamId
-        WHERE AwayTeam.TeamId = ?
-      );      
-    `);
-    const [players] = await stmt.execute([teamId, teamId]);
-    response.send(players);
-  });
-});
-
-export const getGamesByDate = onRequest(async (request, response) => {
-  if (request.query.date == null) {
-    response.send({error: "Must specify a game date."});
-    return;
-  }
-
-  const date = stringToDate(request.query.date.toString());
-  await connect(async (conn) => {
-    const stmt = await conn.prepare(`
+  const teamId = request.data.teamId;
+  return executeSql(`
+    (
       SELECT
+        Game.GameDate,
         HomeTeam.TeamLocation AS HomeTeamLocation,
         HomeTeam.Nickname AS HomeTeamNickname,
         AwayTeam.TeamLocation AS AwayTeamLocation,
         AwayTeam.Nickname AS AwayTeamNickname,
         Game.HomeTeamScore,
         Game.AwayTeamScore
-      FROM Game
-      JOIN Team AS HomeTeam
+      FROM Team AS HomeTeam
+      JOIN Game
         ON Game.HomeTeamId = HomeTeam.TeamId
       JOIN Team AS AwayTeam
         ON Game.AwayTeamId = AwayTeam.TeamId
-      WHERE Game.GameDate = ?;
-    `);
-    const [players] = await stmt.execute([date]);
-    response.send(players);
-  });
+      WHERE HomeTeam.TeamId = ?
+    )
+    UNION
+    (
+      SELECT
+        Game.GameDate,
+        HomeTeam.TeamLocation AS HomeTeamLocation,
+        HomeTeam.Nickname AS HomeTeamNickname,
+        AwayTeam.TeamLocation AS AwayTeamLocation,
+        AwayTeam.Nickname AS AwayTeamNickname,
+        Game.HomeTeamScore,
+        Game.AwayTeamScore
+      FROM Team AS AwayTeam
+      JOIN Game
+        ON Game.AwayTeamId = AwayTeam.TeamId
+      JOIN Team AS HomeTeam
+        ON Game.HomeTeamId = HomeTeam.TeamId
+      WHERE AwayTeam.TeamId = ?
+    );      
+  `, [teamId, teamId]);
+});
+
+export const getGamesByDate = onCall(async (request) => {
+  if (request.data.date == null) {
+    throw new HttpsError("invalid-argument", "Must specify a game date.");
+  }
+
+  const date = stringToDate(request.data.date.toString());
+  return executeSql(`
+    SELECT
+      HomeTeam.TeamLocation AS HomeTeamLocation,
+      HomeTeam.Nickname AS HomeTeamNickname,
+      AwayTeam.TeamLocation AS AwayTeamLocation,
+      AwayTeam.Nickname AS AwayTeamNickname,
+      Game.HomeTeamScore,
+      Game.AwayTeamScore
+    FROM Game
+    JOIN Team AS HomeTeam
+      ON Game.HomeTeamId = HomeTeam.TeamId
+    JOIN Team AS AwayTeam
+      ON Game.AwayTeamId = AwayTeam.TeamId
+    WHERE Game.GameDate = ?;
+  `, [date]);
 });
