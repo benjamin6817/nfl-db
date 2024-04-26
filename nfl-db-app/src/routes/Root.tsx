@@ -1,11 +1,15 @@
-import Nav from '../components/Nav';
+// import Nav from '../components/Nav';
+import { Container } from '@mui/material';
+import ResponsiveAppBar from '../components/ResponsiveAppBar';
 import { Outlet } from 'react-router-dom';
 
 function Root() {
   return (
     <div className="App">
-      <Nav />
-      <Outlet />
+      <ResponsiveAppBar />
+      <Container>
+        <Outlet />
+      </Container>
     </div>
   );
 }

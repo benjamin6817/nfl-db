@@ -9,6 +9,10 @@ import Games from './routes/Games';
 import Players from './routes/Players';
 import Teams from './routes/Teams';
 import ErrorPage from './components/ErrorPage';
+import { ThemeProvider } from '@emotion/react';
+import theme from './theme';
+import { CssBaseline } from '@mui/material';
+import Index from './routes/Home';
 
 const router = createBrowserRouter([
   {
@@ -16,6 +20,10 @@ const router = createBrowserRouter([
     element: <Root />,
     errorElement: <ErrorPage />,
     children: [
+      {
+        index: true,
+        element: <Index />
+      },
       {
         path: "/games",
         element: <Games />,
@@ -34,6 +42,9 @@ const router = createBrowserRouter([
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <RouterProvider router={router}/>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <RouterProvider router={router}/>
+    </ThemeProvider>
   </React.StrictMode>,
 );

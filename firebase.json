@@ -16,7 +16,7 @@
     }
   ],
   "hosting": {
-    "public": "nfl-db-app/build",
+    "public": "nfl-db-app/dist",
     "ignore": [
       "firebase.json",
       "**/.*",
